@@ -10,6 +10,7 @@ class K1 {
 public:
 	virtual ~K1(){}
 	virtual bool operator<(const K1 &other) const = 0;
+
 };
 
 class V1 {
