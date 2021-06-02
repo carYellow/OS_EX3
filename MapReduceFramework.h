@@ -3,26 +3,31 @@
 
 #include "MapReduceClient.h"
 #include "Barrier/Barrier.h"
-typedef void *JobHandle;
+#include <atomic>
 
+typedef void *JobHandle;
+struct JobManager;
 enum stage_t {
     UNDEFINED_STAGE = 0, MAP_STAGE = 1, SHUFFLE_STAGE = 2, REDUCE_STAGE = 3
 };
 
 typedef struct {
     IntermediateVec vector;
+    JobManager *jobManager;
 
 }
-ThreadContext;
+        ThreadContext;
 
-typedef struct{
-    Barrier* barrier;
-    pthread_t* threads;
-    ThreadContext* threadsContexts;
+struct JobManager {
+    Barrier *barrier;
+    pthread_t *threads;
+    ThreadContext *threadsContexts;
     int ThreadsNum;
+    std::atomic<int> nextPairIdx;
+    OutputVec outputVec;
 
-}
-    JobManager;
+
+};
 
 typedef struct {
     stage_t stage;

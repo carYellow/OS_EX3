@@ -22,7 +22,6 @@ JobHandle startMapReduceJob(const MapReduceClient &client,
     spawnThreads(jobManager);
 
 
-
     return jobManager;
 }
 
@@ -46,11 +45,15 @@ int initJobManager(JobManager *jobManager, int threadsNum) {
     jobManager->threads = new pthread_t[threadsNum];
     jobManager->threadsContexts = new ThreadContext[threadsNum];
 
+    for (int i = 0; i < jobManager->ThreadsNum; ++i) {
+        jobManager->threadsContexts[i].jobManager = jobManager;
+    }
+
 }
 
 int spawnThreads(JobManager *jobManager) {
     for (int i = 0; i < jobManager->ThreadsNum; ++i) {
-        pthread_create((jobManager->threads) + i, NULL, threadJob, (jobManager->threadsContexts) + i);
+        pthread_create((jobManager->threads) + i, nullptr, threadJob, (jobManager->threadsContexts) + i);
     }
 
 }
