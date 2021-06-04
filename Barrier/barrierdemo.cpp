@@ -18,7 +18,7 @@ void* foo(void* arg)
 	tc->barrier->barrier();
 
 	printf("Between barriers: %d\n", tc->threadID);
-
+    Barrier* barrier;
 	tc->barrier->barrier();
 
 	printf("After barriers: %d\n", tc->threadID);
