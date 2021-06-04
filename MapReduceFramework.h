@@ -11,21 +11,45 @@ enum stage_t {
     UNDEFINED_STAGE = 0, MAP_STAGE = 1, SHUFFLE_STAGE = 2, REDUCE_STAGE = 3
 };
 
+typedef void (*clientMapFunc)(const K1 *, const V1 *, void *);
+
+typedef void (*clientReduceFunc)(const IntermediateVec *, void *);
+
 typedef struct {
-    IntermediateVec vector;
+    IntermediateVec intermediateVec;
     JobManager *jobManager;
+
 
 }
         ThreadContext;
 
 struct JobManager {
+    //JobManager(const MapReduceClient &mapReduceClient);
+
     Barrier *barrier;
     pthread_t *threads;
     ThreadContext *threadsContexts;
     int ThreadsNum;
     std::atomic<int> nextPairIdx;
     OutputVec outputVec;
+    InputVec inputVec;
+    clientMapFunc mapFunc;
+    clientReduceFunc reduceFunc;
+    const MapReduceClient &mapReduceClient;
 
+    JobManager(int threadsNum, const MapReduceClient &mapReduceClient)
+            : mapReduceClient(mapReduceClient) {
+        barrier = new Barrier(threadsNum);
+        ThreadsNum = threadsNum;
+        threads = new pthread_t[threadsNum];
+        threadsContexts = new ThreadContext[threadsNum];
+        nextPairIdx = 0;
+
+        for (int i = 0; i < ThreadsNum; ++i) {
+            threadsContexts[i].jobManager = this;
+        }
+
+    }
 
 };
 
@@ -48,5 +72,6 @@ void getJobState(JobHandle job, JobState *state);
 
 void closeJobHandle(JobHandle job);
 
-
+int initJobManager(JobManager *jobManager, int threadsNum, const MapReduceClient &client);
+//JobManager(int threadsNum, const MapReduceClient &client);
 #endif //MAPREDUCEFRAMEWORK_H
