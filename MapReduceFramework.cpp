@@ -12,7 +12,7 @@ int spawnThreads(JobManager *jobManager);
 
 //int initJobManager(JobManager *jobManager, int threadsNum,  const MapReduceClient &client);
 
-std::vector<IntermediateVec>* shuffle(ThreadContext *tc);
+std::vector<IntermediateVec*>* shuffle(ThreadContext *);
 
 void emit2(K2 *key, V2 *value, void *context) {
 
@@ -22,7 +22,17 @@ void emit2(K2 *key, V2 *value, void *context) {
 }
 
 void emit3(K3 *key, V3 *value, void *context) {
+    ThreadContext * tc = (ThreadContext*)context;
+    tc->jobManager->outputMutex->lock();
 
+    //critical sec start--------------------------------
+
+    OutputPair outputPair(key,value);
+
+    tc->jobManager->outputVec.push_back(outputPair);
+
+    //critical sec end---------------------------------
+    tc->jobManager->outputMutex->unlock();
 }
 
 
@@ -58,16 +68,25 @@ JobHandle startMapReduceJob(const MapReduceClient &client,
  */
 void waitForJob(JobHandle job) {
     //It is legal to call the function more than once and you should handle it.
-    // Pay attention that calling pthread_jointwice from the same processhas undefinedbehaviorand you must avoid that.
-
+    // Pay attention that calling pthread_join twice from the same process has undefined behaviorand you must avoid that.
+    auto* jobManager = (JobManager*) job;
+    for (int i = 0; i < jobManager->ThreadsNum; ++i) {
+        pthread_join(jobManager->threads[i], nullptr);
+    }
 
 
 }
 
 
-void getJobState(JobHandle job, JobState *state) {}
+void getJobState(JobHandle job, JobState *state) {
 
-void closeJobHandle(JobHandle job) {}
+
+}
+
+void closeJobHandle(JobHandle job) {
+
+
+}
 
 // ______________________________________________________________________
 
@@ -77,22 +96,37 @@ void *threadFunc(void *arg) {
 
     ThreadContext * tc = (ThreadContext *) arg;
 
-    int oldValue = tc->jobManager->nextPairIdx++;
-    //TODO: This line does not run but we are the greatest and Idan our amazing Team leader has instructed us to move forward and his wish is our command
-    tc->jobManager->mapReduceClient.map(tc->jobManager->inputVec[oldValue].first,
-                                         tc->jobManager->inputVec[oldValue].second, tc);
+    while (tc->jobManager->atomicCounter < tc->jobManager->inputVec.size()){
+
+        int oldValue = tc->jobManager->atomicCounter++;
+        tc->jobManager->mapReduceClient.map(tc->jobManager->inputVec[oldValue].first,
+                                            tc->jobManager->inputVec[oldValue].second, tc);
+    }
 
     //sortPhase();
     std::sort(tc->intermediateVec.begin(),tc->intermediateVec.end());
 
-//    tc->jobManager->barrier->barrier();
-//    if(tc->tid == 0){
-//        std::vector<IntermediateVec>shuffledVector = shuffle(tc);
-//    }
-    //They said we should use a se,ephore fr this stage instaed of a barriar
+    tc->jobManager->sortBarrier->barrier();
+    tc->jobManager->atomicCounter = 0;
+    if(tc->tid == 0){
+         tc->jobManager->shuffledVector = shuffle(tc);
+    }
+    //They said we should use a semephore fr this stage instaed of a barriar
     //reset barrier
 
-    tc->jobManager->barrier->barrier();
+    tc->jobManager->shuffleBarrier->barrier();
+    while (!tc->jobManager->shuffledVector->empty()){
+
+        tc->jobManager->reduceMutex->lock();
+        //critical sec
+
+        IntermediateVec *intermediateVec = tc->jobManager->shuffledVector->back();
+        tc->jobManager->shuffledVector->pop_back();
+        tc->jobManager->mapReduceClient.reduce(intermediateVec,tc);
+        tc->jobManager->reduceMutex->unlock();
+    }
+
+
 
 
 
@@ -110,7 +144,7 @@ void *threadFunc(void *arg) {
  */
 bool notAllTheIntermediateVectorsAreEmpty(ThreadContext *tc){
     for (int i = 0; i < tc->jobManager->ThreadsNum; i++){
-        if(tc->jobManager->threadsContexts[i].intermediateVec.size() > 0){
+        if(!tc->jobManager->threadsContexts[i].intermediateVec.empty()){
             return true;
         }
     }
@@ -123,13 +157,13 @@ bool notAllTheIntermediateVectorsAreEmpty(ThreadContext *tc){
  */
 std::vector<int> getIdsOfThreadsWithLargestKeys(ThreadContext *tc){
     std::vector<int>  idsOfThreadsWithLargestKeys =  std::vector<int>();
-    auto largestPair = tc->jobManager->threadsContexts[0].intermediateVec.back(); //TPDO make sure this is the right type
+    auto largestPair = tc->jobManager->threadsContexts[0].intermediateVec.back(); //TODO make sure this is the right type
 
     //Finding the largest Key
     for(int i = 0; i < tc->jobManager->ThreadsNum; i++){
         // Get id's of threads with largest keys
         auto currentPair = tc->jobManager->threadsContexts[i].intermediateVec.back();
-        if(currentPair > largestPair){
+        if(currentPair.first > largestPair.first){
             largestPair = currentPair;
         }
     }
@@ -138,32 +172,35 @@ std::vector<int> getIdsOfThreadsWithLargestKeys(ThreadContext *tc){
     for(int i = 0; i < tc->jobManager->ThreadsNum; i++){
         auto currentPair = tc->jobManager->threadsContexts[i].intermediateVec.back();
         //Check if this vector also has the largest index
-        if(!(largestPair > currentPair) && (largestPair < currentPair)){
+        if(!(largestPair.first > currentPair.first) && !(largestPair.first < currentPair.first)){
             idsOfThreadsWithLargestKeys.push_back(i);
         }
     }
     return idsOfThreadsWithLargestKeys;
 
 }
-std::vector<IntermediateVec>* shuffle(ThreadContext *tc) {
-    auto* shuffledVec = new std::vector<IntermediateVec>();
+std::vector<IntermediateVec*>* shuffle(ThreadContext *tc) {
+    auto* shuffledVec = new std::vector<IntermediateVec*>();
 
     while(notAllTheIntermediateVectorsAreEmpty(tc)){
         std::vector<int> idsOfThreadsWithLargestKeys = getIdsOfThreadsWithLargestKeys(tc);
-        std::vector<std::pair<K2 *, V2 *>> vectorOfLargestPairs =   std::vector<std::pair<K2 *, V2 *>>();
+        std::vector<std::pair<K2 *, V2 *>> * vectorOfLargestPairs =  new std::vector<std::pair<K2 *, V2 *>>();
 
 
 
-        for (int j = 0; j < idsOfThreadsWithLargestKeys.size(); ++j) {
+        for (int idOfThread : idsOfThreadsWithLargestKeys) {
             //Get the largest pair from the vector
-            IntermediatePair largest_pair = tc->intermediateVec.back();
+            IntermediatePair largest_pair = tc->jobManager->threadsContexts[idOfThread].intermediateVec.back();
             //pop largest pair from the vector
-            tc->intermediateVec.pop_back();
+            tc->jobManager->threadsContexts[idOfThread].intermediateVec.pop_back();
             //Add pair to the the new vector
-            vectorOfLargestPairs.push_back(largest_pair);
+            vectorOfLargestPairs->push_back(largest_pair);
 
         }
+
         shuffledVec->push_back(vectorOfLargestPairs);
+        //Whenever a new vector is inserted to the queue you shouldupdate the atomic counter.
+        tc->jobManager->atomicCounter++;
     }
 
     return shuffledVec;
