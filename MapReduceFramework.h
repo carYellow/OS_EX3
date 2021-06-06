@@ -15,7 +15,7 @@ typedef void (*clientMapFunc)(const K1 *, const V1 *, void *);
 
 typedef void (*clientReduceFunc)(const IntermediateVec *, void *);
 
-typedef struct {
+typedef struct ThreadContext{
     IntermediateVec intermediateVec;
     JobManager *jobManager;
     int tid;
@@ -36,8 +36,8 @@ struct JobManager {
     clientReduceFunc reduceFunc;
     const MapReduceClient &mapReduceClient;
 
-    JobManager(int threadsNum, const MapReduceClient &mapReduceClient)
-            : mapReduceClient(mapReduceClient) {
+    JobManager(int threadsNum, const MapReduceClient &mapReduceClient, const InputVec &inputVec, OutputVec &outputVec)
+            : mapReduceClient(mapReduceClient), inputVec(inputVec), outputVec(outputVec) {
 
         barrier = new Barrier(threadsNum);
         ThreadsNum = threadsNum;
@@ -51,6 +51,7 @@ struct JobManager {
         }
 
     }
+
 
 };
 

@@ -43,7 +43,7 @@ void emit3(K3 *key, V3 *value, void *context) {
 JobHandle startMapReduceJob(const MapReduceClient &client,
                             const InputVec &inputVec, OutputVec &outputVec,
                             int multiThreadLevel) {
-    JobManager *jobManager = new JobManager(multiThreadLevel, client);
+    JobManager *jobManager = new JobManager(multiThreadLevel, client, inputVec, outputVec);
 
 //    initJobManager(jobManager, multiThreadLevel, client);
     spawnThreads(jobManager);
@@ -75,7 +75,7 @@ void closeJobHandle(JobHandle job) {}
 void *threadFunc(void *arg) {
 //    mapPhase();
 
-    auto *tc = (ThreadContext *) arg;
+    ThreadContext * tc = (ThreadContext *) arg;
 
     int oldValue = tc->jobManager->nextPairIdx++;
     //TODO: This line does not run but we are the greatest and Idan our amazing Team leader has instructed us to move forward and his wish is our command
@@ -85,10 +85,10 @@ void *threadFunc(void *arg) {
     //sortPhase();
     std::sort(tc->intermediateVec.begin(),tc->intermediateVec.end());
 
-    tc->jobManager->barrier->barrier();
-    if(tc->tid == 0){
-        std::vector<IntermediateVec>shuffledVector = shuffle(tc);
-    }
+//    tc->jobManager->barrier->barrier();
+//    if(tc->tid == 0){
+//        std::vector<IntermediateVec>shuffledVector = shuffle(tc);
+//    }
     //They said we should use a se,ephore fr this stage instaed of a barriar
     //reset barrier
 
@@ -151,6 +151,9 @@ std::vector<IntermediateVec>* shuffle(ThreadContext *tc) {
     while(notAllTheIntermediateVectorsAreEmpty(tc)){
         std::vector<int> idsOfThreadsWithLargestKeys = getIdsOfThreadsWithLargestKeys(tc);
         std::vector<std::pair<K2 *, V2 *>> vectorOfLargestPairs =   std::vector<std::pair<K2 *, V2 *>>();
+
+
+
         for (int j = 0; j < idsOfThreadsWithLargestKeys.size(); ++j) {
             //Get the largest pair from the vector
             IntermediatePair largest_pair = tc->intermediateVec.back();
@@ -189,7 +192,7 @@ int spawnThreads(JobManager *jobManager) {
     for (int i = 0; i < jobManager->ThreadsNum; ++i) {
         pthread_create((jobManager->threads) + i, nullptr, threadFunc, (jobManager->threadsContexts) + i);
     }
-    return NULL;
+    return -1; //TODO change this
 }
 
 
