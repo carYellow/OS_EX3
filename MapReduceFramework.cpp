@@ -106,7 +106,7 @@ void *threadFunc(void *arg) {
     //sortPhase();
     std::sort(tc->intermediateVec.begin(),tc->intermediateVec.end());
 
-    tc->jobManager->sortBarrier->barrier();
+    tc->jobManager->sortBarrier->barrier();//---------------------------------------------------
     tc->jobManager->atomicCounter = 0;
     if(tc->tid == 0){
          tc->jobManager->shuffledVector = shuffle(tc);
@@ -114,7 +114,7 @@ void *threadFunc(void *arg) {
     //They said we should use a semephore fr this stage instaed of a barriar
     //reset barrier
 
-    tc->jobManager->shuffleBarrier->barrier();
+    tc->jobManager->shuffleBarrier->barrier();//--------------------------------------------------
     while (!tc->jobManager->shuffledVector->empty()){
 
         tc->jobManager->reduceMutex->lock();

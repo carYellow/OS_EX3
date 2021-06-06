@@ -45,6 +45,7 @@ struct JobManager {
 //    clientReduceFunc reduceFunc;
     const MapReduceClient &mapReduceClient;
     JobState* jobState;
+    std::atomic<int64_t> progressAtomic;
 
 
 
