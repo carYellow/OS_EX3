@@ -3,6 +3,7 @@
 //
 
 #include <algorithm>
+#include <iostream>
 #include "MapReduceFramework.h"
 
 
@@ -118,11 +119,13 @@ void *threadFunc(void *arg) {
     while (!tc->jobManager->shuffledVector->empty()){
 
         tc->jobManager->reduceMutex->lock();
-        //critical sec
+        //critical sec--------------------------------------------------------------------------------
 
         IntermediateVec *intermediateVec = tc->jobManager->shuffledVector->back();
         tc->jobManager->shuffledVector->pop_back();
         tc->jobManager->mapReduceClient.reduce(intermediateVec,tc);
+        //critical sec--------------------------------------------------------------------------------
+
         tc->jobManager->reduceMutex->unlock();
     }
 
@@ -157,11 +160,12 @@ bool notAllTheIntermediateVectorsAreEmpty(ThreadContext *tc){
  */
 std::vector<int> getIdsOfThreadsWithLargestKeys(ThreadContext *tc){
     std::vector<int>  idsOfThreadsWithLargestKeys =  std::vector<int>();
-    auto largestPair = tc->jobManager->threadsContexts[0].intermediateVec.back(); //TODO make sure this is the right type
+    auto largestPair = tc->jobManager->threadsContexts[0].intermediateVec.back(); //TODO maybe this vector is empty....
 
     //Finding the largest Key
     for(int i = 0; i < tc->jobManager->ThreadsNum; i++){
         // Get id's of threads with largest keys
+        //TODO iterate only vector that are not empty!!!
         auto currentPair = tc->jobManager->threadsContexts[i].intermediateVec.back();
         if(currentPair.first > largestPair.first){
             largestPair = currentPair;
@@ -201,6 +205,7 @@ std::vector<IntermediateVec*>* shuffle(ThreadContext *tc) {
         shuffledVec->push_back(vectorOfLargestPairs);
         //Whenever a new vector is inserted to the queue you shouldupdate the atomic counter.
         tc->jobManager->atomicCounter++;
+        std::cout<<(tc->jobManager->atomicCounter);
     }
 
     return shuffledVec;
