@@ -5,7 +5,79 @@
 #include <algorithm>
 #include <iostream>
 #include "MapReduceFramework.h"
+#include "Barrier.h"
+#include <atomic>
 
+
+typedef struct ThreadContext {
+    IntermediateVec intermediateVec;
+    JobManager *jobManager;
+    int tid;
+
+} ThreadContext;
+
+struct JobManager {
+    //JobManager(const MapReduceClient &mapReduceClient);
+
+    Barrier *sortBarrier;
+    Barrier *shuffleBarrier;
+//    std::mutex *reduceMutex; // no no
+//    std::mutex *outputMutex; // no no todo
+    pthread_mutex_t  percentageMutex;
+    pthread_mutex_t  reduceMutex;
+    pthread_mutex_t  statusMutex;
+
+    pthread_t *threads;
+    ThreadContext *threadsContexts;
+    int ThreadsNum;
+    std::atomic<u_int64_t> atomicCounter;
+    std::atomic<u_int64_t> pairsFinished;
+    OutputVec& outputVec;
+    InputVec inputVec;
+    std::vector<IntermediateVec *> *shuffledVector;
+//    clientMapFunc mapFunc;
+//    clientReduceFunc reduceFunc;
+    const MapReduceClient &mapReduceClient;
+    JobState *jobState;
+    std::atomic<int> stage;
+    std::atomic<int> totalWork;
+    std::atomic<int> numberOfVector;
+    std::atomic<int> numberOfIntermediatePairs;
+    bool joinedWasCalled = false;
+
+
+
+    JobManager(int threadsNum, const MapReduceClient &mapReduceClient, const InputVec &inputVec, OutputVec &outputVec)
+            : mapReduceClient(mapReduceClient), inputVec(inputVec), outputVec(outputVec) {
+//            : mapReduceClient(mapReduceClient) ,outputVec(outputVec){
+//    {
+
+        sortBarrier = new Barrier(threadsNum);
+        shuffleBarrier = new Barrier(threadsNum);
+        reduceMutex = PTHREAD_MUTEX_INITIALIZER;
+        percentageMutex = PTHREAD_MUTEX_INITIALIZER;
+        statusMutex = PTHREAD_MUTEX_INITIALIZER;
+        numberOfIntermediatePairs = 0;
+        ThreadsNum = threadsNum;
+        threads = new pthread_t[threadsNum];
+        threadsContexts = new ThreadContext[threadsNum];
+        atomicCounter = 0;
+        pairsFinished = 0;
+        stage = 0;
+        numberOfVector=0;
+        totalWork = inputVec.size();
+
+        /*for (int i = 0; i < threadsNum; ++i) {
+            threadsContexts[i].jobManager = this;
+            threadsContexts[i].tid = i;
+        }*/
+        jobState = new JobState();
+        jobState->stage = UNDEFINED_STAGE;
+
+    }
+
+
+};
 
 void *threadFunc(void *arg);
 
@@ -24,16 +96,19 @@ void emit2(K2 *key, V2 *value, void *context) {
 
 void emit3(K3 *key, V3 *value, void *context) {
     ThreadContext *tc = (ThreadContext *) context;
-    tc->jobManager->outputMutex->lock();
+    pthread_mutex_lock(&tc->jobManager->reduceMutex);
+//    tc->jobManager->outputMutex->lock();// no no todo
 
     //critical sec start--------------------------------
-
+//    OutputVec o
     OutputPair outputPair(key, value);
 
     tc->jobManager->outputVec.push_back(outputPair);
-
+//    tc->jobManager->atomicCounter++;
+    tc->jobManager->pairsFinished++;
     //critical sec end---------------------------------
-    tc->jobManager->outputMutex->unlock();
+//    tc->jobManager->outputMutex->unlock();
+    pthread_mutex_unlock(&tc->jobManager->reduceMutex);
 }
 
 
@@ -54,11 +129,18 @@ void emit3(K3 *key, V3 *value, void *context) {
 JobHandle startMapReduceJob(const MapReduceClient &client,
                             const InputVec &inputVec, OutputVec &outputVec,
                             int multiThreadLevel) {
-    JobManager *jobManager = new JobManager(multiThreadLevel, client, inputVec, outputVec);
+    auto *jobManager = new JobManager(multiThreadLevel, client, inputVec, outputVec);
+    for (int i = 0; i < multiThreadLevel; ++i) {
+        jobManager->threadsContexts[i].jobManager = jobManager;
+        jobManager->threadsContexts[i].tid = i;
+    }
 
 //    initJobManager(jobManager, multiThreadLevel, client);
-    spawnThreads(jobManager);
-
+    int res = spawnThreads(jobManager);
+    if(res <0){
+        fprintf(stderr, "system error: Could Not Create Thread, maybe be use std threads it they are better then pthreads\\n");
+        exit(1);
+    }
 
     return jobManager;
 }
@@ -71,6 +153,10 @@ void waitForJob(JobHandle job) {
     //It is legal to call the function more than once and you should handle it.
     // Pay attention that calling pthread_join twice from the same process has undefined behaviorand you must avoid that.
     auto *jobManager = (JobManager *) job;
+    if(jobManager->joinedWasCalled){
+        return;
+    }
+    jobManager->joinedWasCalled = true;
     for (int i = 0; i < jobManager->ThreadsNum; ++i) {
         pthread_join(jobManager->threads[i], nullptr);
     }
@@ -83,13 +169,31 @@ void getJobState(JobHandle job, JobState *state) {
     JobManager *jobManager = (JobManager *) job;
     stage_t stage = (stage_t) jobManager->stage.load();
     state->stage = stage;
-    state->percentage = ((float) jobManager->atomicCounter)*100 / jobManager->totalWork;
+    state->percentage = ((float) jobManager->pairsFinished)*100 / jobManager->totalWork;
 
 }
-
+/**
+ * Releasing all resources of a job. You should prevent releasing resources before the job finished. After this function
+ * is called the job handle will be invalid.In case that the functioni s called and the
+ * job is not finished yet wait until the job is finished to close it
+ * @param job
+ */
 void closeJobHandle(JobHandle job) {
-
-
+    waitForJob(job);
+    auto * jobManager = (JobManager * )job;
+    delete jobManager->shuffleBarrier;
+    delete jobManager->sortBarrier;
+    delete jobManager->jobState;
+    delete [] jobManager->threads;
+    delete [] jobManager->threadsContexts;
+    pthread_mutex_destroy(&jobManager->reduceMutex);
+    for (int i = 0; i < jobManager->shuffledVector->size(); ++i) {
+        delete jobManager->shuffledVector->at(i);
+    }
+    delete jobManager->shuffledVector;
+    pthread_mutex_destroy(&jobManager->percentageMutex);
+    pthread_mutex_destroy(&jobManager->statusMutex);
+    delete jobManager;
 }
 
 // ______________________________________________________________________
@@ -100,53 +204,83 @@ void *threadFunc(void *arg) {
 
     ThreadContext *tc = (ThreadContext *) arg;
 
-    while (tc->jobManager->atomicCounter < tc->jobManager->inputVec.size()) {
+    int oldValue = tc->jobManager->atomicCounter++;
+    while (oldValue < tc->jobManager->inputVec.size()) {
         tc->jobManager->stage = MAP_STAGE;
-        int oldValue = tc->jobManager->atomicCounter++;
         tc->jobManager->mapReduceClient.map(tc->jobManager->inputVec[oldValue].first,
                                             tc->jobManager->inputVec[oldValue].second, tc);
+
+        oldValue = tc->jobManager->atomicCounter++;
+        // todo mutex
+        pthread_mutex_lock(&tc->jobManager->statusMutex);
+        tc->jobManager->pairsFinished++;
+
+        // insert in JOB STATE
     }
-    tc->jobManager->totalWork=0;
+
+//    tc->jobManager->totalWork=0;
     //sortPhase();
     if (!tc->intermediateVec.empty()) {
 
-        std::sort(tc->intermediateVec.begin(), tc->intermediateVec.end());
-        int old = tc->jobManager->totalWork.load();
-        tc->jobManager->totalWork = old +tc->intermediateVec.size();
-        std::sort(tc->intermediateVec.begin(),tc->intermediateVec.end(),[](const auto& left, const auto& right) -> bool {
+//        std::sort(tc->intermediateVec.begin(), tc->intermediateVec.end());
+        pthread_mutex_lock(&tc->jobManager->percentageMutex);
+        int old = tc->jobManager->numberOfIntermediatePairs.load();
+        tc->jobManager->numberOfIntermediatePairs = old +tc->intermediateVec.size();
+        pthread_mutex_unlock(&tc->jobManager->percentageMutex);
+//        int old = tc->jobManager->numberOfIntermediatePairs.load();
+//        tc->jobManager->numberOfIntermediatePairs = old +tc->intermediateVec.size();
+        std::sort(tc->intermediateVec.begin(),tc->intermediateVec.end(),[](const IntermediatePair & left, const IntermediatePair& right) -> bool {
             return  *(left.first) < *(right.first);
         });
     }
 
     tc->jobManager->sortBarrier->barrier();//---------------------------------------------------
     if (tc->tid == 0) {
+//        tc->jobManager->pairsFinished = 0;
+        // todo
+//        pthread_mutex_lock(&tc->jobManager->percentageMutex);
         tc->jobManager->stage = SHUFFLE_STAGE;
+        tc->jobManager->pairsFinished = 0;
+        tc->jobManager->totalWork = tc->jobManager->numberOfIntermediatePairs.load();
+//        pthread_mutex_unlock(&tc->jobManager->percentageMutex);
+//        printf("%d\n", tc->jobManager->totalWork.load());
+//        fflush(stdout);
 
-
-
+//        tc->jobManager->stage = SHUFFLE_STAGE;
         tc->jobManager->shuffledVector = shuffle(tc);
         tc->jobManager->atomicCounter=0;
+        tc->jobManager->numberOfVector = 0;
+//        tc->jobManager->pairsFinished =0;
+
+        // todo
+//        pthread_mutex_lock(&tc->jobManager->percentageMutex);
+        tc->jobManager->totalWork = tc->jobManager->shuffledVector->size();
+//        pthread_mutex_unlock(&tc->jobManager->percentageMutex);
+
     }
     //They said we should use a semephore fr this stage instaed of a barriar
     //reset barrier
 
     tc->jobManager->shuffleBarrier->barrier();//--------------------------------------------------
-    while (!tc->jobManager->shuffledVector->empty()) {
+
+    int oldValTwo =  tc->jobManager->numberOfVector++;
+    while (oldValTwo < tc->jobManager->shuffledVector->size()) {
+
         tc->jobManager->stage = REDUCE_STAGE;
+        tc->jobManager->pairsFinished =0;
 
-        tc->jobManager->reduceMutex->lock();
+//        tc->jobManager->reduceMutex->lock();
         //critical sec--------------------------------------------------------------------------------
 
-        IntermediateVec *intermediateVec = tc->jobManager->shuffledVector->back();
-        tc->jobManager->shuffledVector->pop_back();
+        IntermediateVec *intermediateVec = tc->jobManager->shuffledVector->at(oldValTwo);
+//        tc->jobManager->shuffledVector->pop_back();
         tc->jobManager->mapReduceClient.reduce(intermediateVec, tc);
-        tc->jobManager->atomicCounter+=1;
+        oldValTwo = tc->jobManager->numberOfVector++;
         //critical sec--------------------------------------------------------------------------------
 
-        tc->jobManager->reduceMutex->unlock();
+//        tc->jobManager->reduceMutex->unlock();
     }
-
-    return nullptr;
+    return arg;
 }
 
 /**
@@ -211,13 +345,14 @@ std::vector<IntermediateVec *> *shuffle(ThreadContext *tc) {
 
     while (notAllTheIntermediateVectorsAreEmpty(tc)) {
         std::vector<int> idsOfThreadsWithLargestKeys = getIdsOfThreadsWithLargestKeys(tc);
-        auto * vectorOfLargestPairs =  new std::vector<std::pair<K2 *, V2 *>>();
+        auto *vectorOfLargestPairs =  new  std::vector<std::pair<K2 *, V2 *>>();
 
 
 
         for (int idOfThread : idsOfThreadsWithLargestKeys) {
 
-            for (int i = 0; i < tc->jobManager->threadsContexts[idOfThread].intermediateVec.size(); ++i) {
+            long size = tc->jobManager->threadsContexts[idOfThread].intermediateVec.size();
+            for (int i = 0; i < size; ++i) {
 
                 //Get the largest pairs from the vector
                 IntermediatePair largestPair = tc->jobManager->threadsContexts[idOfThread].intermediateVec.back();
@@ -225,7 +360,8 @@ std::vector<IntermediateVec *> *shuffle(ThreadContext *tc) {
                 tc->jobManager->threadsContexts[idOfThread].intermediateVec.pop_back();
                 //Add pair to the the new vector
                 vectorOfLargestPairs->push_back(largestPair);
-                tc->jobManager->atomicCounter++;
+//                tc->jobManager->atomicCounter++;
+                tc->jobManager->pairsFinished++;
 
                 if(!(tc->jobManager->threadsContexts[idOfThread].intermediateVec.empty())) {
                     IntermediatePair nextPair = tc->jobManager->threadsContexts[idOfThread].intermediateVec.back();
@@ -241,10 +377,11 @@ std::vector<IntermediateVec *> *shuffle(ThreadContext *tc) {
 
         shuffledVec->push_back(vectorOfLargestPairs);
         //Whenever a new vector is inserted to the queue you shouldupdate the atomic counter.
-        tc->jobManager->atomicCounter++;
+//        tc->jobManager->atomicCounter++;
 //        std::cout << (tc->jobManager->atomicCounter);
     }
-
+//    printf("%lu\n", tc->jobManager->atomicCounter.load());
+//    fflush(stdout);
     return shuffledVec;
 
 }
@@ -269,9 +406,12 @@ std::vector<IntermediateVec *> *shuffle(ThreadContext *tc) {
 
 int spawnThreads(JobManager *jobManager) {
     for (int i = 0; i < jobManager->ThreadsNum; ++i) {
-        pthread_create((jobManager->threads) + i, nullptr, threadFunc, (jobManager->threadsContexts) + i);
+        int res = pthread_create((jobManager->threads) + i, nullptr, threadFunc, (jobManager->threadsContexts) + i);
+        if(res < 0 ){
+            return -1;
+        }
     }
-    return -1; //TODO change this
+    return 0; //TODO change this
 }
 
 
