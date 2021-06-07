@@ -167,10 +167,11 @@ void waitForJob(JobHandle job) {
 
 void getJobState(JobHandle job, JobState *state) {
     JobManager *jobManager = (JobManager *) job;
-    stage_t stage = (stage_t) jobManager->stage.load();
-    state->stage = stage;
+//    stage_t stage = (stage_t) jobManager->stage.load();
+    pthread_mutex_lock(&jobManager->statusMutex);
+    state->stage = (stage_t)jobManager->stage.load();
     state->percentage = ((float) jobManager->pairsFinished)*100 / jobManager->totalWork;
-
+    pthread_mutex_unlock(&jobManager->statusMutex);
 }
 /**
  * Releasing all resources of a job. You should prevent releasing resources before the job finished. After this function
@@ -214,7 +215,7 @@ void *threadFunc(void *arg) {
         // todo mutex
         pthread_mutex_lock(&tc->jobManager->statusMutex);
         tc->jobManager->pairsFinished++;
-
+        pthread_mutex_unlock(&tc->jobManager->statusMutex);
         // insert in JOB STATE
     }
 
@@ -233,15 +234,16 @@ void *threadFunc(void *arg) {
             return  *(left.first) < *(right.first);
         });
     }
-
     tc->jobManager->sortBarrier->barrier();//---------------------------------------------------
     if (tc->tid == 0) {
 //        tc->jobManager->pairsFinished = 0;
         // todo
 //        pthread_mutex_lock(&tc->jobManager->percentageMutex);
+        pthread_mutex_lock(&tc->jobManager->statusMutex);
         tc->jobManager->stage = SHUFFLE_STAGE;
         tc->jobManager->pairsFinished = 0;
         tc->jobManager->totalWork = tc->jobManager->numberOfIntermediatePairs.load();
+        pthread_mutex_unlock(&tc->jobManager->statusMutex);
 //        pthread_mutex_unlock(&tc->jobManager->percentageMutex);
 //        printf("%d\n", tc->jobManager->totalWork.load());
 //        fflush(stdout);
@@ -251,6 +253,11 @@ void *threadFunc(void *arg) {
         tc->jobManager->atomicCounter=0;
         tc->jobManager->numberOfVector = 0;
 //        tc->jobManager->pairsFinished =0;
+
+        pthread_mutex_lock(&tc->jobManager->statusMutex);
+        tc->jobManager->stage = REDUCE_STAGE;
+        tc->jobManager->pairsFinished =0;
+        pthread_mutex_unlock(&tc->jobManager->statusMutex);
 
         // todo
 //        pthread_mutex_lock(&tc->jobManager->percentageMutex);
@@ -266,8 +273,6 @@ void *threadFunc(void *arg) {
     int oldValTwo =  tc->jobManager->numberOfVector++;
     while (oldValTwo < tc->jobManager->shuffledVector->size()) {
 
-        tc->jobManager->stage = REDUCE_STAGE;
-        tc->jobManager->pairsFinished =0;
 
 //        tc->jobManager->reduceMutex->lock();
         //critical sec--------------------------------------------------------------------------------

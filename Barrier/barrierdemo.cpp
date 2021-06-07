@@ -1,4 +1,4 @@
-#include "Barrier.h"
+#include "OS_EX3/Barrier.h"
 #include <pthread.h>
 #include <cstdio>
 

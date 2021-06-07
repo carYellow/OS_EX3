@@ -2,9 +2,8 @@
 #define MAPREDUCEFRAMEWORK_H
 
 #include "MapReduceClient.h"
-#include "Barrier/Barrier.h"
-#include <atomic>
-#include <mutex>
+
+
 
 typedef void *JobHandle;
 struct JobManager;
@@ -20,64 +19,74 @@ typedef struct {
 } JobState;
 
 typedef void (*clientReduceFunc)(const IntermediateVec *, void *);
-
-typedef struct ThreadContext {
-    IntermediateVec intermediateVec;
-    JobManager *jobManager;
-    int tid;
-
-} ThreadContext;
-
-struct JobManager {
-    //JobManager(const MapReduceClient &mapReduceClient);
-
-    Barrier *sortBarrier;
-    Barrier *shuffleBarrier;
-    std::mutex *reduceMutex;
-    std::mutex *outputMutex;
-    pthread_t *threads;
-    ThreadContext *threadsContexts;
-    int ThreadsNum;
-    std::atomic<u_int64_t> atomicCounter;
-    OutputVec outputVec;
-    InputVec inputVec;
-    std::vector<IntermediateVec *> *shuffledVector;
-//    clientMapFunc mapFunc;
-//    clientReduceFunc reduceFunc;
-    const MapReduceClient &mapReduceClient;
-    JobState *jobState;
-    std::atomic<int> stage;
-    std::atomic<int> totalWork;
-    std::atomic<int> intermediatePairsTotalNum;
-
-
-    JobManager(int threadsNum, const MapReduceClient &mapReduceClient, const InputVec &inputVec, OutputVec &outputVec)
-            : mapReduceClient(mapReduceClient), inputVec(inputVec), outputVec(outputVec) {
-
-        sortBarrier = new Barrier(threadsNum);
-        shuffleBarrier = new Barrier(threadsNum);
-        reduceMutex = new std::mutex();
-        outputMutex = new std::mutex();
-
-        ThreadsNum = threadsNum;
-        threads = new pthread_t[threadsNum];
-        threadsContexts = new ThreadContext[threadsNum];
-        atomicCounter = 0;
-        stage = 0;
-        intermediatePairsTotalNum=0;
-        totalWork = inputVec.size();
-
-        for (int i = 0; i < ThreadsNum; ++i) {
-            threadsContexts[i].jobManager = this;
-            threadsContexts[i].tid = i;
-        }
-        jobState = new JobState();
-        jobState->stage = UNDEFINED_STAGE;
-
-    }
-
-
-};
+//
+//typedef struct ThreadContext {
+//    IntermediateVec intermediateVec;
+//    JobManager *jobManager;
+//    int tid;
+//
+//} ThreadContext;
+//
+//struct JobManager {
+//    //JobManager(const MapReduceClient &mapReduceClient);
+//
+//    Barrier *sortBarrier;
+//    Barrier *shuffleBarrier;
+////    std::mutex *reduceMutex; // no no
+//    std::mutex *outputMutex; // no no todo
+//    pthread_mutex_t  percentageMutex;
+//    pthread_mutex_t  reduceMutex;
+//
+//    pthread_t *threads;
+//    ThreadContext *threadsContexts;
+//    int ThreadsNum;
+//    std::atomic<u_int64_t> atomicCounter;
+//    std::atomic<u_int64_t> pairsFinished;
+//    OutputVec& outputVec;
+//    InputVec inputVec;
+//    std::vector<IntermediateVec *> *shuffledVector;
+////    clientMapFunc mapFunc;
+////    clientReduceFunc reduceFunc;
+//    const MapReduceClient &mapReduceClient;
+//    JobState *jobState;
+//    std::atomic<int> stage;
+//    std::atomic<int> totalWork;
+//    std::atomic<int> numberOfVector;
+//    std::atomic<int> numberOfIntermediatePairs;
+//    bool joinedWasCalled = false;
+//
+//
+//    JobManager(int threadsNum, const MapReduceClient &mapReduceClient, const InputVec &inputVec, OutputVec &outputVec)
+//            : mapReduceClient(mapReduceClient), inputVec(inputVec), outputVec(outputVec) {
+////            : mapReduceClient(mapReduceClient) ,outputVec(outputVec){
+////    {
+//
+//        sortBarrier = new Barrier(threadsNum);
+//        shuffleBarrier = new Barrier(threadsNum);
+//        reduceMutex = PTHREAD_MUTEX_INITIALIZER;
+//        percentageMutex = PTHREAD_MUTEX_INITIALIZER;
+////        outputMutex = new std::mutex();
+//        numberOfIntermediatePairs = 0;
+//        ThreadsNum = threadsNum;
+//        threads = new pthread_t[threadsNum];
+//        threadsContexts = new ThreadContext[threadsNum];
+//        atomicCounter = 0;
+//        pairsFinished = 0;
+//        stage = 0;
+//        numberOfVector=0;
+//        totalWork = inputVec.size();
+//
+//        /*for (int i = 0; i < threadsNum; ++i) {
+//            threadsContexts[i].jobManager = this;
+//            threadsContexts[i].tid = i;
+//        }*/
+//        jobState = new JobState();
+//        jobState->stage = UNDEFINED_STAGE;
+//
+//    }
+//
+//
+//};
 
 
 void emit2(K2 *key, V2 *value, void *context);
