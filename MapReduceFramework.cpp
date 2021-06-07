@@ -106,12 +106,13 @@ void *threadFunc(void *arg) {
         tc->jobManager->mapReduceClient.map(tc->jobManager->inputVec[oldValue].first,
                                             tc->jobManager->inputVec[oldValue].second, tc);
     }
-
+    tc->jobManager->totalWork=0;
     //sortPhase();
     if (!tc->intermediateVec.empty()) {
 
         std::sort(tc->intermediateVec.begin(), tc->intermediateVec.end());
-        tc->jobManager->intermediatePairsTotalNum++;
+        int old = tc->jobManager->totalWork.load();
+        tc->jobManager->totalWork = old +tc->intermediateVec.size();
         std::sort(tc->intermediateVec.begin(),tc->intermediateVec.end(),[](const auto& left, const auto& right) -> bool {
             return  *(left.first) < *(right.first);
         });
@@ -124,6 +125,7 @@ void *threadFunc(void *arg) {
 
 
         tc->jobManager->shuffledVector = shuffle(tc);
+        tc->jobManager->atomicCounter=0;
     }
     //They said we should use a semephore fr this stage instaed of a barriar
     //reset barrier
@@ -138,6 +140,7 @@ void *threadFunc(void *arg) {
         IntermediateVec *intermediateVec = tc->jobManager->shuffledVector->back();
         tc->jobManager->shuffledVector->pop_back();
         tc->jobManager->mapReduceClient.reduce(intermediateVec, tc);
+        tc->jobManager->atomicCounter+=1;
         //critical sec--------------------------------------------------------------------------------
 
         tc->jobManager->reduceMutex->unlock();
@@ -222,6 +225,7 @@ std::vector<IntermediateVec *> *shuffle(ThreadContext *tc) {
                 tc->jobManager->threadsContexts[idOfThread].intermediateVec.pop_back();
                 //Add pair to the the new vector
                 vectorOfLargestPairs->push_back(largestPair);
+                tc->jobManager->atomicCounter++;
 
                 if(!(tc->jobManager->threadsContexts[idOfThread].intermediateVec.empty())) {
                     IntermediatePair nextPair = tc->jobManager->threadsContexts[idOfThread].intermediateVec.back();
