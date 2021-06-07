@@ -88,7 +88,8 @@ int main(int argc, char** argv)
             printf("stage %d, %f%% \n", 
 			state.stage, state.percentage);
         }
-		usleep(100000);
+		usleep(10);
+//		usleep(100000);
         last_state = state;
 		getJobState(job, &state);
 	}

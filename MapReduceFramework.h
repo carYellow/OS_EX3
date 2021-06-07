@@ -11,6 +11,7 @@ struct JobManager;
 enum stage_t {
     UNDEFINED_STAGE = 0, MAP_STAGE = 1, SHUFFLE_STAGE = 2, REDUCE_STAGE = 3
 };
+
 typedef void (*clientMapFunc)(const K1 *, const V1 *, void *);
 
 typedef struct {
@@ -20,12 +21,12 @@ typedef struct {
 
 typedef void (*clientReduceFunc)(const IntermediateVec *, void *);
 
-typedef struct ThreadContext{
+typedef struct ThreadContext {
     IntermediateVec intermediateVec;
     JobManager *jobManager;
     int tid;
 
-}ThreadContext;
+} ThreadContext;
 
 struct JobManager {
     //JobManager(const MapReduceClient &mapReduceClient);
@@ -37,16 +38,17 @@ struct JobManager {
     pthread_t *threads;
     ThreadContext *threadsContexts;
     int ThreadsNum;
-    std::atomic<int> atomicCounter;
+    std::atomic<u_int64_t> atomicCounter;
     OutputVec outputVec;
     InputVec inputVec;
-    std::vector<IntermediateVec*> * shuffledVector;
+    std::vector<IntermediateVec *> *shuffledVector;
 //    clientMapFunc mapFunc;
 //    clientReduceFunc reduceFunc;
     const MapReduceClient &mapReduceClient;
-    JobState* jobState;
-    std::atomic<int64_t> progressAtomic;
-
+    JobState *jobState;
+    std::atomic<int> stage;
+    std::atomic<int> totalWork;
+    std::atomic<int> intermediatePairsTotalNum;
 
 
     JobManager(int threadsNum, const MapReduceClient &mapReduceClient, const InputVec &inputVec, OutputVec &outputVec)
@@ -61,19 +63,21 @@ struct JobManager {
         threads = new pthread_t[threadsNum];
         threadsContexts = new ThreadContext[threadsNum];
         atomicCounter = 0;
+        stage = 0;
+        intermediatePairsTotalNum=0;
+        totalWork = inputVec.size();
 
         for (int i = 0; i < ThreadsNum; ++i) {
             threadsContexts[i].jobManager = this;
             threadsContexts[i].tid = i;
         }
-        jobState = new JobState ();
+        jobState = new JobState();
         jobState->stage = UNDEFINED_STAGE;
 
     }
 
 
 };
-
 
 
 void emit2(K2 *key, V2 *value, void *context);
