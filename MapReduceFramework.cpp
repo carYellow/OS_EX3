@@ -105,7 +105,10 @@ void *threadFunc(void *arg) {
     }
 
     //sortPhase();
-    std::sort(tc->intermediateVec.begin(),tc->intermediateVec.end());
+    if (!tc->intermediateVec.empty()){
+
+        std::sort(tc->intermediateVec.begin(),tc->intermediateVec.end());
+    }
 
     tc->jobManager->sortBarrier->barrier();//---------------------------------------------------
     tc->jobManager->atomicCounter = 0;
@@ -160,12 +163,21 @@ bool notAllTheIntermediateVectorsAreEmpty(ThreadContext *tc){
  */
 std::vector<int> getIdsOfThreadsWithLargestKeys(ThreadContext *tc){
     std::vector<int>  idsOfThreadsWithLargestKeys =  std::vector<int>();
-    auto largestPair = tc->jobManager->threadsContexts[0].intermediateVec.back(); //TODO maybe this vector is empty....
+    IntermediatePair largestPair;
+    for (int i = 0; i < tc->jobManager->ThreadsNum ; ++i) {
+        if(!tc->jobManager->threadsContexts[i].intermediateVec.empty()){
+            largestPair = tc->jobManager->threadsContexts[i].intermediateVec.back();
+            break;
+        }
+    }
 
     //Finding the largest Key
     for(int i = 0; i < tc->jobManager->ThreadsNum; i++){
         // Get id's of threads with largest keys
         //TODO iterate only vector that are not empty!!!
+        if (tc->jobManager->threadsContexts[i].intermediateVec.empty()){
+            continue;
+        }
         auto currentPair = tc->jobManager->threadsContexts[i].intermediateVec.back();
         if(currentPair.first > largestPair.first){
             largestPair = currentPair;
@@ -174,6 +186,9 @@ std::vector<int> getIdsOfThreadsWithLargestKeys(ThreadContext *tc){
 
     //Finding all the vectors that have the largest keys.
     for(int i = 0; i < tc->jobManager->ThreadsNum; i++){
+        if (tc->jobManager->threadsContexts[i].intermediateVec.empty()){
+            continue;
+        }
         auto currentPair = tc->jobManager->threadsContexts[i].intermediateVec.back();
         //Check if this vector also has the largest index
         if(!(largestPair.first > currentPair.first) && !(largestPair.first < currentPair.first)){
