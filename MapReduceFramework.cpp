@@ -112,6 +112,9 @@ void *threadFunc(void *arg) {
 
         std::sort(tc->intermediateVec.begin(), tc->intermediateVec.end());
         tc->jobManager->intermediatePairsTotalNum++;
+        std::sort(tc->intermediateVec.begin(),tc->intermediateVec.end(),[](const auto& left, const auto& right) -> bool {
+            return  *(left.first) < *(right.first);
+        });
     }
 
     tc->jobManager->sortBarrier->barrier();//---------------------------------------------------
@@ -173,14 +176,13 @@ std::vector<int> getIdsOfThreadsWithLargestKeys(ThreadContext *tc) {
     }
 
     //Finding the largest Key
-    for (int i = 0; i < tc->jobManager->ThreadsNum; i++) {
+    for(int i = 0; i < tc->jobManager->ThreadsNum; i++){
         // Get id's of threads with largest keys
-        //TODO iterate only vector that are not empty!!!
         if (tc->jobManager->threadsContexts[i].intermediateVec.empty()) {
             continue;
         }
         auto currentPair = tc->jobManager->threadsContexts[i].intermediateVec.back();
-        if (currentPair.first > largestPair.first) {
+        if(*(largestPair.first) < *(currentPair.first)){
             largestPair = currentPair;
         }
     }
@@ -192,7 +194,7 @@ std::vector<int> getIdsOfThreadsWithLargestKeys(ThreadContext *tc) {
         }
         auto currentPair = tc->jobManager->threadsContexts[i].intermediateVec.back();
         //Check if this vector also has the largest index
-        if (!(largestPair.first > currentPair.first) && !(largestPair.first < currentPair.first)) {
+        if(!(*(largestPair.first) < *(currentPair.first)) && !(*(currentPair.first) < *(largestPair.first))){
             idsOfThreadsWithLargestKeys.push_back(i);
         }
     }
@@ -206,17 +208,31 @@ std::vector<IntermediateVec *> *shuffle(ThreadContext *tc) {
 
     while (notAllTheIntermediateVectorsAreEmpty(tc)) {
         std::vector<int> idsOfThreadsWithLargestKeys = getIdsOfThreadsWithLargestKeys(tc);
-        std::vector<std::pair<K2 *, V2 *>> *vectorOfLargestPairs = new std::vector<std::pair<K2 *, V2 *>>();
+        auto * vectorOfLargestPairs =  new std::vector<std::pair<K2 *, V2 *>>();
+
 
 
         for (int idOfThread : idsOfThreadsWithLargestKeys) {
-            //Get the largest pair from the vector
-            IntermediatePair largest_pair = tc->jobManager->threadsContexts[idOfThread].intermediateVec.back();
-            //pop largest pair from the vector
-            tc->jobManager->threadsContexts[idOfThread].intermediateVec.pop_back();
-            //Add pair to the the new vector
-            vectorOfLargestPairs->push_back(largest_pair);
 
+            for (int i = 0; i < tc->jobManager->threadsContexts[idOfThread].intermediateVec.size(); ++i) {
+
+                //Get the largest pairs from the vector
+                IntermediatePair largestPair = tc->jobManager->threadsContexts[idOfThread].intermediateVec.back();
+                //pop largest pair from the vector
+                tc->jobManager->threadsContexts[idOfThread].intermediateVec.pop_back();
+                //Add pair to the the new vector
+                vectorOfLargestPairs->push_back(largestPair);
+
+                if(!(tc->jobManager->threadsContexts[idOfThread].intermediateVec.empty())) {
+                    IntermediatePair nextPair = tc->jobManager->threadsContexts[idOfThread].intermediateVec.back();
+                    if ((*(largestPair.first) < *(nextPair.first)) || (*(nextPair.first) < *(largestPair.first))) {
+                        //pairs are not equal so you can continue to the next vector
+                        break;
+                    }
+                } else{
+                    break;
+                }
+            }
         }
 
         shuffledVec->push_back(vectorOfLargestPairs);
